@@ -5,10 +5,17 @@ from google import genai
 from google.genai import types
 from config import system_prompt
 from functions.get_files_info import schema_get_files_info
+from functions.get_file_content import schema_get_file_content
+from functions.run_python import schema_run_python_file
+from functions.write_file import schema_write_file
+from functions.call_function import call_function
 
 available_functions = types.Tool(
     function_declarations=[
         schema_get_files_info,
+        schema_get_file_content,
+        schema_run_python_file,
+        schema_write_file,
     ]
 )
 
@@ -23,9 +30,7 @@ if len(sys.argv) < 2:
 
 prompt = sys.argv[1]
 
-is_verbose = False
-if "--verbose" in sys.argv:
-    is_verbose = True
+verbose = "--verbose" in sys.argv
 
 messages = [
     types.Content(role="user", parts=[types.Part(text=prompt)]),
@@ -43,13 +48,24 @@ prompt_tokens = response.usage_metadata.prompt_token_count
 response_tokens = response.usage_metadata.candidates_token_count
 
 
+# python
 if response.function_calls:
-    for function_call_part in response.function_calls:
-        print(f"Calling function: {function_call_part.name}({function_call_part.args})")
+    for fc in response.function_calls:
+        if fc.name == "run_python_file" and "args" not in (fc.args or {}):
+            fc.args = dict(fc.args or {})
+            fc.args["args"] = []
+
+        function_call_result = call_function(fc, verbose=verbose)
+
+        fr = function_call_result.parts[0].function_response.response
+        if fr is None:
+            raise RuntimeError("Missing function_response.response from tool call")
+        if verbose:
+            print(f"-> {fr}")
 else:
     print(response.text)
 
-if is_verbose:
-    print(f"User prompt:, {prompt}")
-    print(f"Prompt tokens:, {prompt_tokens}")
-    print(f"Response tokens:, {response_tokens}")
+if verbose:
+    print(f"User prompt: {prompt}")
+    print(f"Prompt tokens: {prompt_tokens}")
+    print(f"Response tokens: {response_tokens}")
